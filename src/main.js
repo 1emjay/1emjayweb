@@ -54,15 +54,15 @@ const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
 const cornerRun = {
   active: false,
-  source: 'auto',
   startTime: 0,
   duration: 0.8,
   corner: { x: 1, y: 1 },
-  speedScale: 1,
   start: new THREE.Vector3(),
   control: new THREE.Vector3(),
   target: new THREE.Vector3(),
 };
+const clickBoostMax = 14;
+const clickBoostDecayPerSecond = 0.55;
 let currentSpeed = 150;
 let speedBoost = 1;
 let lastAccentSwap = 0;
@@ -88,14 +88,17 @@ function render() {
   const motionScale = getMotionScale();
 
   if (!cornerRun.active && elapsed >= nextNaturalCornerAt) {
-    startCornerRun('auto', elapsed);
+    startCornerRun(elapsed);
   }
 
   if (cornerRun.active) {
     updateCornerRun(elapsed);
   } else {
     if (speedBoost > 1) {
-      speedBoost = Math.max(1, speedBoost - 1.4 * delta);
+      speedBoost = 1 + (speedBoost - 1) * Math.pow(clickBoostDecayPerSecond, delta);
+      if (speedBoost < 1.001) {
+        speedBoost = 1;
+      }
     }
     const effectiveSpeed = currentSpeed * speedBoost;
     mark.group.position.x += velocity.x * effectiveSpeed * delta * motionScale;
@@ -148,7 +151,7 @@ function handlePointerDown(event) {
   }
 
   event.preventDefault();
-  startCornerRun('click', clock.elapsedTime);
+  speedBoost = clickBoostMax;
 }
 
 function handlePointerMove(event) {
@@ -164,23 +167,21 @@ function isPointerOnMark(event) {
   return raycaster.intersectObject(mark.group, true).length > 0;
 }
 
-function startCornerRun(source, elapsed) {
+function startCornerRun(elapsed) {
   if (cornerRun.active) {
     return;
   }
 
   const corner = currentDirectionCorner();
   cornerRun.active = true;
-  cornerRun.source = source;
   cornerRun.startTime = elapsed;
   cornerRun.corner = corner;
-  cornerRun.speedScale = source === 'click' ? 1.55 : 1;
   cornerRun.start.copy(mark.group.position);
   cornerRun.target.copy(getCornerTarget(corner));
   computeBezierControl(cornerRun.start, cornerRun.target, velocity, cornerRun.control);
 
   const arcLength = estimateBezierLength(cornerRun.start, cornerRun.control, cornerRun.target);
-  const speed = currentSpeed * cornerRun.speedScale * getMotionScale();
+  const speed = currentSpeed * getMotionScale();
   cornerRun.duration = Math.max(arcLength / speed, 0.18);
 }
 
@@ -201,7 +202,6 @@ function updateCornerRun(elapsed) {
 function finishCornerRun(elapsed) {
   snapToCorner(cornerRun.corner);
   velocity.set(-cornerRun.corner.x, -cornerRun.corner.y).normalize();
-  speedBoost = cornerRun.speedScale;
   cornerRun.active = false;
   lastAccentSwap = elapsed;
   setAccent((accentIndex + 1) % accentPalette.length);
