@@ -1,10 +1,25 @@
 import * as THREE from '../vendor/three.module.min.js';
 
+const WORDMARK = '1emjay';
+const CAPTION = 'coming soon';
+
+const accentPalette = [
+  '#ff5b54',
+  '#5b6cff',
+  '#e8b14a',
+  '#6fbf9a',
+  '#c875d6',
+];
+const inkColor = '#e6e0d4';
+const inkMutedColor = 'rgba(230, 224, 212, 0.55)';
+const frameColor = 'rgba(230, 224, 212, 0.65)';
+const backgroundColor = 0x0a0a0c;
+
 const canvas = document.querySelector('#stage');
 const cornerEffectElement = document.querySelector('#corner-effect');
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x020203);
+scene.background = new THREE.Color(backgroundColor);
 
 const camera = new THREE.OrthographicCamera();
 camera.position.set(0, 0, 700);
@@ -15,12 +30,7 @@ const renderer = new THREE.WebGLRenderer({
   antialias: true,
   powerPreference: 'high-performance',
 });
-
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const viewport = {
   width: 1,
@@ -31,27 +41,10 @@ const viewport = {
   bottom: -0.5,
 };
 
-const palette = ['#ff7a1a', '#00e6d2', '#ffcf38', '#ff4d8d', '#8cff5a', '#b48cff'];
-let accentIndex = 0;
+let accentIndex = Math.floor(Math.random() * accentPalette.length);
 
-const construction = createConstructionObject();
-scene.add(construction.group);
-
-const ambient = new THREE.HemisphereLight(0xffffff, 0x09090d, 1.55);
-scene.add(ambient);
-
-const keyLight = new THREE.DirectionalLight(0xffffff, 2.7);
-keyLight.position.set(-160, 230, 360);
-keyLight.castShadow = true;
-keyLight.shadow.camera.left = -420;
-keyLight.shadow.camera.right = 420;
-keyLight.shadow.camera.top = 280;
-keyLight.shadow.camera.bottom = -280;
-scene.add(keyLight);
-
-const rimLight = new THREE.PointLight(0x00e6d2, 1.4, 750, 1.5);
-rimLight.position.set(240, -160, 290);
-scene.add(rimLight);
+const mark = createMark();
+scene.add(mark.group);
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const velocity = new THREE.Vector2(1, 0.72).normalize();
@@ -65,13 +58,18 @@ const cornerRun = {
   startTime: 0,
   duration: 0.8,
   corner: { x: 1, y: 1 },
+  speedScale: 1,
   start: new THREE.Vector3(),
+  control: new THREE.Vector3(),
   target: new THREE.Vector3(),
-  rotation: new THREE.Euler(),
 };
 let currentSpeed = 150;
+let speedBoost = 1;
 let lastAccentSwap = 0;
 let nextNaturalCornerAt = Infinity;
+
+await waitForFonts();
+mark.repaint();
 
 resize();
 window.addEventListener('resize', resize, { passive: true });
@@ -89,17 +87,6 @@ function render() {
   const delta = Math.min(clock.getDelta(), 0.04);
   const motionScale = getMotionScale();
 
-  if (!cornerRun.active) {
-    construction.group.rotation.x = Math.sin(elapsed * 0.7) * 0.18;
-    construction.group.rotation.y = 0.26 + Math.sin(elapsed * 0.82) * 0.36;
-    construction.group.rotation.z = Math.sin(elapsed * 0.52) * 0.08;
-  }
-
-  construction.equalizerBars.forEach((bar, index) => {
-    const wave = Math.sin(elapsed * 4.8 + index * 0.85) * 0.5 + 0.5;
-    bar.scale.y = 0.36 + wave * 0.94;
-  });
-
   if (!cornerRun.active && elapsed >= nextNaturalCornerAt) {
     startCornerRun('auto', elapsed);
   }
@@ -107,12 +94,15 @@ function render() {
   if (cornerRun.active) {
     updateCornerRun(elapsed);
   } else {
-    construction.group.position.x += velocity.x * currentSpeed * delta * motionScale;
-    construction.group.position.y += velocity.y * currentSpeed * delta * motionScale;
+    if (speedBoost > 1) {
+      speedBoost = Math.max(1, speedBoost - 1.4 * delta);
+    }
+    const effectiveSpeed = currentSpeed * speedBoost;
+    mark.group.position.x += velocity.x * effectiveSpeed * delta * motionScale;
+    mark.group.position.y += velocity.y * effectiveSpeed * delta * motionScale;
     clampToViewport(elapsed);
   }
 
-  rimLight.color.set(palette[accentIndex]);
   renderer.render(scene, camera);
 }
 
@@ -139,20 +129,21 @@ function resize() {
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(width, height, false);
 
-  const preferredScale = THREE.MathUtils.clamp(Math.min(width / 760, height / 430), 0.24, 0.86);
-  const maximumScale = Math.min(width / 610, height / 330, 0.86);
-  construction.group.scale.setScalar(Math.max(0.18, Math.min(preferredScale, maximumScale)));
+  const preferredScale = THREE.MathUtils.clamp(Math.min(width / 1400, height / 800), 0.22, 0.6);
+  const maximumScale = Math.min(width / 1100, height / 600, 0.62);
+  mark.group.scale.setScalar(Math.max(0.2, Math.min(preferredScale, maximumScale)));
 
   if (cornerRun.active) {
     cornerRun.target.copy(getCornerTarget(cornerRun.corner));
+    computeBezierControl(cornerRun.start, cornerRun.target, velocity, cornerRun.control);
   }
 
-  currentSpeed = THREE.MathUtils.clamp(Math.min(width, height) * 0.34, 104, 190);
+  currentSpeed = THREE.MathUtils.clamp(Math.min(width, height) * 0.32, 96, 178);
   clampToViewport(clock.elapsedTime, true);
 }
 
 function handlePointerDown(event) {
-  if (!isPointerOnSign(event)) {
+  if (!isPointerOnMark(event)) {
     return;
   }
 
@@ -161,16 +152,16 @@ function handlePointerDown(event) {
 }
 
 function handlePointerMove(event) {
-  canvas.style.cursor = isPointerOnSign(event) ? 'pointer' : 'default';
+  canvas.style.cursor = isPointerOnMark(event) ? 'pointer' : 'default';
 }
 
-function isPointerOnSign(event) {
+function isPointerOnMark(event) {
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
   raycaster.setFromCamera(pointer, camera);
 
-  return raycaster.intersectObject(construction.group, true).length > 0;
+  return raycaster.intersectObject(mark.group, true).length > 0;
 }
 
 function startCornerRun(source, elapsed) {
@@ -183,24 +174,24 @@ function startCornerRun(source, elapsed) {
   cornerRun.source = source;
   cornerRun.startTime = elapsed;
   cornerRun.corner = corner;
-  cornerRun.start.copy(construction.group.position);
-  cornerRun.rotation.copy(construction.group.rotation);
+  cornerRun.speedScale = source === 'click' ? 1.55 : 1;
+  cornerRun.start.copy(mark.group.position);
   cornerRun.target.copy(getCornerTarget(corner));
+  computeBezierControl(cornerRun.start, cornerRun.target, velocity, cornerRun.control);
 
-  const distance = cornerRun.start.distanceTo(cornerRun.target);
-  if (source === 'click') {
-    cornerRun.duration = THREE.MathUtils.clamp(distance / 1400, 0.28, 0.68);
-  } else {
-    cornerRun.duration = Math.max(distance / (currentSpeed * getMotionScale()), 0.28);
-  }
+  const arcLength = estimateBezierLength(cornerRun.start, cornerRun.control, cornerRun.target);
+  const speed = currentSpeed * cornerRun.speedScale * getMotionScale();
+  cornerRun.duration = Math.max(arcLength / speed, 0.18);
 }
 
 function updateCornerRun(elapsed) {
   const progress = THREE.MathUtils.clamp((elapsed - cornerRun.startTime) / cornerRun.duration, 0, 1);
-  const travelProgress = cornerRun.source === 'click' ? easeInOutCubic(progress) : progress;
-
-  construction.group.rotation.copy(cornerRun.rotation);
-  construction.group.position.lerpVectors(cornerRun.start, cornerRun.target, travelProgress);
+  const u = 1 - progress;
+  const t = progress;
+  mark.group.position.x =
+    u * u * cornerRun.start.x + 2 * u * t * cornerRun.control.x + t * t * cornerRun.target.x;
+  mark.group.position.y =
+    u * u * cornerRun.start.y + 2 * u * t * cornerRun.control.y + t * t * cornerRun.target.y;
 
   if (progress >= 1) {
     finishCornerRun(elapsed);
@@ -210,10 +201,11 @@ function updateCornerRun(elapsed) {
 function finishCornerRun(elapsed) {
   snapToCorner(cornerRun.corner);
   velocity.set(-cornerRun.corner.x, -cornerRun.corner.y).normalize();
+  speedBoost = cornerRun.speedScale;
   cornerRun.active = false;
   lastAccentSwap = elapsed;
-  setAccent((accentIndex + 1) % palette.length);
-  playCornerEffect(cornerRun.corner, elapsed);
+  setAccent((accentIndex + 1) % accentPalette.length);
+  playCornerEffect(cornerRun.corner);
   scheduleNaturalCorner(elapsed);
 }
 
@@ -225,30 +217,30 @@ function currentDirectionCorner() {
 }
 
 function getCornerTarget(corner) {
-  construction.group.updateMatrixWorld(true);
-  bounds.setFromObject(construction.group);
+  mark.group.updateMatrixWorld(true);
+  bounds.setFromObject(mark.group);
 
-  const leftOffset = bounds.min.x - construction.group.position.x;
-  const rightOffset = bounds.max.x - construction.group.position.x;
-  const bottomOffset = bounds.min.y - construction.group.position.y;
-  const topOffset = bounds.max.y - construction.group.position.y;
+  const leftOffset = bounds.min.x - mark.group.position.x;
+  const rightOffset = bounds.max.x - mark.group.position.x;
+  const bottomOffset = bounds.min.y - mark.group.position.y;
+  const topOffset = bounds.max.y - mark.group.position.y;
 
   return new THREE.Vector3(
     corner.x > 0 ? viewport.right - rightOffset : viewport.left - leftOffset,
     corner.y > 0 ? viewport.top - topOffset : viewport.bottom - bottomOffset,
-    construction.group.position.z,
+    mark.group.position.z,
   );
 }
 
 function snapToCorner(corner) {
-  construction.group.position.copy(getCornerTarget(corner));
-  construction.group.updateMatrixWorld(true);
+  mark.group.position.copy(getCornerTarget(corner));
+  mark.group.updateMatrixWorld(true);
 }
 
 function scheduleNaturalCorner(elapsed, first = false) {
-  const minDelay = first ? 5.5 : 10;
-  const maxDelay = first ? 8.5 : 17;
-  const motionScale = reducedMotion ? 1.7 : 1;
+  const minDelay = first ? 6 : 12;
+  const maxDelay = first ? 10 : 22;
+  const motionScale = reducedMotion ? 1.8 : 1;
   nextNaturalCornerAt = elapsed + (minDelay + Math.random() * (maxDelay - minDelay)) * motionScale;
 }
 
@@ -256,58 +248,86 @@ function getMotionScale() {
   return reducedMotion ? 0.35 : 1;
 }
 
-function easeInOutCubic(value) {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
+function computeBezierControl(start, target, currentVelocity, out) {
+  const dx = target.x - start.x;
+  const dy = target.y - start.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < 1) {
+    out.copy(target);
+    return out;
+  }
+
+  const dotVD = currentVelocity.x * dx + currentVelocity.y * dy;
+  const minOffset = dist * 0.32;
+  const maxOffset = dist * 0.95;
+
+  let offset;
+  if (dotVD <= dist * 0.05) {
+    offset = dist * 0.5;
+  } else {
+    offset = THREE.MathUtils.clamp((dist * dist) / (2 * dotVD), minOffset, maxOffset);
+  }
+
+  out.set(start.x + currentVelocity.x * offset, start.y + currentVelocity.y * offset, start.z);
+  return out;
+}
+
+function estimateBezierLength(P0, P1, P2) {
+  const samples = 12;
+  let length = 0;
+  let prevX = P0.x;
+  let prevY = P0.y;
+  for (let i = 1; i <= samples; i += 1) {
+    const t = i / samples;
+    const u = 1 - t;
+    const x = u * u * P0.x + 2 * u * t * P1.x + t * t * P2.x;
+    const y = u * u * P0.y + 2 * u * t * P1.y + t * t * P2.y;
+    length += Math.hypot(x - prevX, y - prevY);
+    prevX = x;
+    prevY = y;
+  }
+  return length;
 }
 
 function clampToViewport(elapsed, force = false) {
-  construction.group.updateMatrixWorld(true);
-  bounds.setFromObject(construction.group);
+  mark.group.updateMatrixWorld(true);
+  bounds.setFromObject(mark.group);
 
   let bounced = false;
 
   if (bounds.min.x < viewport.left) {
-    construction.group.position.x += viewport.left - bounds.min.x;
+    mark.group.position.x += viewport.left - bounds.min.x;
     velocity.x = Math.abs(velocity.x);
     bounced = true;
   }
 
   if (bounds.max.x > viewport.right) {
-    construction.group.position.x -= bounds.max.x - viewport.right;
+    mark.group.position.x -= bounds.max.x - viewport.right;
     velocity.x = -Math.abs(velocity.x);
     bounced = true;
   }
 
   if (bounds.min.y < viewport.bottom) {
-    construction.group.position.y += viewport.bottom - bounds.min.y;
+    mark.group.position.y += viewport.bottom - bounds.min.y;
     velocity.y = Math.abs(velocity.y);
     bounced = true;
   }
 
   if (bounds.max.y > viewport.top) {
-    construction.group.position.y -= bounds.max.y - viewport.top;
+    mark.group.position.y -= bounds.max.y - viewport.top;
     velocity.y = -Math.abs(velocity.y);
     bounced = true;
   }
 
-  if (bounced && (force || elapsed - lastAccentSwap > 0.12)) {
+  if (bounced && (force || elapsed - lastAccentSwap > 0.14)) {
     lastAccentSwap = elapsed;
-    setAccent((accentIndex + 1) % palette.length);
+    setAccent((accentIndex + 1) % accentPalette.length);
   }
 }
 
 function setAccent(nextIndex) {
   accentIndex = nextIndex;
-  construction.paintTexture(palette[accentIndex]);
-
-  construction.accentMaterials.forEach((material) => {
-    material.color.set(palette[accentIndex]);
-    if (material.emissive) {
-      material.emissive.set(palette[accentIndex]);
-    }
-  });
 }
 
 function playCornerEffect(corner) {
@@ -315,7 +335,7 @@ function playCornerEffect(corner) {
     return;
   }
 
-  const rgb = hexToRgb(palette[accentIndex]);
+  const rgb = hexToRgb(accentPalette[accentIndex]);
   cornerEffectElement.style.setProperty('--burst-x', corner.x > 0 ? '100%' : '0%');
   cornerEffectElement.style.setProperty('--burst-y', corner.y > 0 ? '0%' : '100%');
   cornerEffectElement.style.setProperty('--burst-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
@@ -334,211 +354,101 @@ function hexToRgb(hex) {
   };
 }
 
-function createConstructionObject() {
-  const group = new THREE.Group();
-  const accentMaterials = [];
-  const equalizerBars = [];
-  const width = 420;
-  const height = 176;
-  const depth = 54;
-
-  const paint = createSignTexture(palette[accentIndex]);
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x111116,
-    roughness: 0.42,
-    metalness: 0.38,
-  });
-
-  const sideMaterial = new THREE.MeshStandardMaterial({
-    color: 0x050507,
-    roughness: 0.46,
-    metalness: 0.62,
-  });
-
-  const faceMaterial = new THREE.MeshStandardMaterial({
-    map: paint.texture,
-    roughness: 0.58,
-    metalness: 0.08,
-  });
-
-  const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), [
-    sideMaterial,
-    sideMaterial,
-    sideMaterial,
-    sideMaterial,
-    faceMaterial,
-    bodyMaterial,
-  ]);
-  body.castShadow = true;
-  body.receiveShadow = true;
-  group.add(body);
-
-  const edgeMaterial = new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.28,
-  });
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(body.geometry), edgeMaterial);
-  group.add(edges);
-
-  const railMaterial = createAccentMaterial(palette[accentIndex], 0.9);
-  accentMaterials.push(railMaterial);
-
-  const topRail = new THREE.Mesh(new THREE.BoxGeometry(width + 18, 8, 10), railMaterial);
-  topRail.position.set(0, height / 2 + 9, 3);
-  const bottomRail = topRail.clone();
-  bottomRail.position.y = -height / 2 - 9;
-  group.add(topRail, bottomRail);
-
-  for (let i = 0; i < 7; i += 1) {
-    const barMaterial = createAccentMaterial(i % 2 === 0 ? palette[accentIndex] : '#ffffff', 0.72);
-    if (i % 2 === 0) {
-      accentMaterials.push(barMaterial);
-    }
-
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(10, 48, 13), barMaterial);
-    bar.position.set(-172 + i * 20, -50, depth / 2 + 11);
-    bar.castShadow = true;
-    equalizerBars.push(bar);
-    group.add(bar);
+async function waitForFonts() {
+  if (!document.fonts) {
+    return;
   }
 
-  const noteMaterial = createAccentMaterial('#ffffff', 0.5);
-  const note = createMusicNote(noteMaterial);
-  note.position.set(166, -36, depth / 2 + 15);
-  note.rotation.z = -0.08;
-  group.add(note);
-
-  group.rotation.set(-0.08, 0.32, 0.04);
-  group.position.set(-viewport.width * 0.17, viewport.height * 0.11, 0);
-
-  return {
-    group,
-    equalizerBars,
-    accentMaterials,
-    paintTexture: paint.draw,
-  };
+  try {
+    await Promise.all([
+      document.fonts.load("700 188px 'Space Grotesk'"),
+      document.fonts.load("400 32px 'Space Grotesk'"),
+    ]);
+  } catch (err) {
+    // Font failed to load — fall back to whatever the canvas resolves.
+  }
 }
 
-function createAccentMaterial(color, intensity) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: intensity,
-    roughness: 0.28,
-    metalness: 0.2,
-  });
-}
+function createMark() {
+  const group = new THREE.Group();
 
-function createMusicNote(material) {
-  const note = new THREE.Group();
+  const planeWidth = 720;
+  const planeHeight = 260;
+  const textureWidth = 1440;
+  const textureHeight = 520;
 
-  const head = new THREE.Mesh(new THREE.TorusGeometry(14, 4.2, 12, 36), material);
-  head.scale.set(1.18, 0.78, 1);
-  note.add(head);
-
-  const stem = new THREE.Mesh(new THREE.BoxGeometry(7, 58, 8), material);
-  stem.position.set(14, 34, 0);
-  note.add(stem);
-
-  const flag = new THREE.Mesh(new THREE.BoxGeometry(36, 7, 8), material);
-  flag.position.set(30, 64, 0);
-  flag.rotation.z = -0.24;
-  note.add(flag);
-
-  return note;
-}
-
-function createSignTexture(initialAccent) {
   const textureCanvas = document.createElement('canvas');
-  textureCanvas.width = 1024;
-  textureCanvas.height = 430;
+  textureCanvas.width = textureWidth;
+  textureCanvas.height = textureHeight;
+  const ctx = textureCanvas.getContext('2d');
 
-  const context = textureCanvas.getContext('2d');
   const texture = new THREE.CanvasTexture(textureCanvas);
-  texture.anisotropy = 8;
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  function draw(accent = initialAccent) {
-    const width = textureCanvas.width;
-    const height = textureCanvas.height;
+  const planeMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+  });
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(planeWidth, planeHeight),
+    planeMaterial,
+  );
+  group.add(plane);
 
-    context.clearRect(0, 0, width, height);
+  function drawRoundedRect(context, x, y, w, h, r) {
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + w - r, y);
+    context.quadraticCurveTo(x + w, y, x + w, y + r);
+    context.lineTo(x + w, y + h - r);
+    context.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    context.lineTo(x + r, y + h);
+    context.quadraticCurveTo(x, y + h, x, y + h - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+    context.closePath();
+  }
 
-    const background = context.createLinearGradient(0, 0, width, height);
-    background.addColorStop(0, '#0f1015');
-    background.addColorStop(0.56, '#050507');
-    background.addColorStop(1, '#15151b');
-    context.fillStyle = background;
-    context.fillRect(0, 0, width, height);
+  function repaint() {
+    ctx.clearRect(0, 0, textureWidth, textureHeight);
 
-    drawHazardBand(context, 0, 82, width, accent);
-    drawHazardBand(context, height - 82, 82, width, accent);
+    const lineWidth = 6;
+    const inset = lineWidth / 2 + 4;
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = lineWidth;
+    drawRoundedRect(
+      ctx,
+      inset,
+      inset,
+      textureWidth - inset * 2,
+      textureHeight - inset * 2,
+      22,
+    );
+    ctx.stroke();
 
-    context.fillStyle = 'rgba(255, 255, 255, 0.06)';
-    context.fillRect(0, 82, width, 2);
-    context.fillRect(0, height - 84, width, 2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
 
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.shadowColor = accent;
-    context.shadowBlur = 20;
-    context.fillStyle = '#f7f3e9';
-    context.font = '900 76px Arial, Helvetica, sans-serif';
-    context.fillText('UNDER', width / 2, 164);
+    ctx.fillStyle = inkColor;
+    ctx.font = "700 188px 'Space Grotesk', system-ui, sans-serif";
+    ctx.fillText(WORDMARK, textureWidth / 2, textureHeight / 2 + 32);
 
-    context.shadowBlur = 26;
-    context.font = `${fitText(context, 'CONSTRUCTION', 810, 94, 48)}px Arial Black, Arial, Helvetica, sans-serif`;
-    context.fillText('CONSTRUCTION', width / 2, 252);
-
-    context.shadowBlur = 0;
-    context.fillStyle = accent;
-    context.fillRect(264, 312, 496, 8);
-
-    context.fillStyle = 'rgba(247, 243, 233, 0.64)';
-    context.font = '700 28px Arial, Helvetica, sans-serif';
-    context.fillText('COMING SOON', width / 2, 354);
+    ctx.fillStyle = inkMutedColor;
+    ctx.font = "400 32px 'Space Grotesk', system-ui, sans-serif";
+    if ('letterSpacing' in ctx) {
+      ctx.letterSpacing = '8px';
+    }
+    ctx.fillText(CAPTION.toUpperCase(), textureWidth / 2, textureHeight / 2 + 100);
+    if ('letterSpacing' in ctx) {
+      ctx.letterSpacing = '0px';
+    }
 
     texture.needsUpdate = true;
   }
 
-  draw(initialAccent);
-
-  return { texture, draw };
-}
-
-function drawHazardBand(context, y, height, width, accent) {
-  context.fillStyle = accent;
-  context.fillRect(0, y, width, height);
-
-  context.save();
-  context.beginPath();
-  context.rect(0, y, width, height);
-  context.clip();
-  context.fillStyle = '#050507';
-
-  for (let x = -width; x < width * 2; x += 112) {
-    context.beginPath();
-    context.moveTo(x, y + height);
-    context.lineTo(x + 56, y + height);
-    context.lineTo(x + 130, y);
-    context.lineTo(x + 74, y);
-    context.closePath();
-    context.fill();
-  }
-
-  context.restore();
-}
-
-function fitText(context, text, maxWidth, maxSize, minSize) {
-  let size = maxSize;
-  do {
-    context.font = `900 ${size}px Arial Black, Arial, Helvetica, sans-serif`;
-    if (context.measureText(text).width <= maxWidth) {
-      return size;
-    }
-    size -= 2;
-  } while (size >= minSize);
-
-  return minSize;
+  return { group, plane, repaint };
 }

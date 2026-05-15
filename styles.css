@@ -1,3 +1,19 @@
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("./vendor/fonts/space-grotesk-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./vendor/fonts/space-grotesk-400.woff2") format("woff2");
+}
+
 * {
   box-sizing: border-box;
 }
@@ -8,12 +24,13 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #020203;
+  background: #0a0a0c;
 }
 
 body {
   min-height: 100dvh;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  color: #e6e0d4;
 }
 
 h1 {
@@ -36,55 +53,59 @@ h1 {
   height: 100dvh;
   touch-action: none;
   background:
-    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.035), transparent 34rem),
-    #020203;
+    radial-gradient(circle at 50% 48%, rgba(230, 224, 212, 0.025), transparent 38rem),
+    #0a0a0c;
+}
+
+#grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 220px 220px;
 }
 
 #corner-effect {
   --burst-x: 100%;
   --burst-y: 0%;
-  --burst-rgb: 255, 122, 26;
+  --burst-rgb: 255, 91, 84;
   position: fixed;
   inset: 0;
   z-index: 2;
   pointer-events: none;
   opacity: 0;
-  mix-blend-mode: screen;
 }
 
-#corner-effect::before,
-#corner-effect::after {
+#corner-effect::before {
   content: "";
   position: absolute;
   left: var(--burst-x);
   top: var(--burst-y);
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 0.12rem solid rgb(var(--burst-rgb));
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0.09rem solid rgb(var(--burst-rgb));
   border-radius: 999rem;
-  box-shadow: 0 0 1.6rem rgba(var(--burst-rgb), 0.8);
+  box-shadow: 0 0 1.2rem rgba(var(--burst-rgb), 0.5);
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.2);
 }
 
 #corner-effect.is-active {
-  animation: corner-wash 1.55s ease-out both;
+  animation: corner-wash 0.95s ease-out both;
   background:
-    radial-gradient(circle at var(--burst-x) var(--burst-y), rgba(var(--burst-rgb), 0.42), transparent 42%),
-    radial-gradient(circle at var(--burst-x) var(--burst-y), rgba(255, 255, 255, 0.2), transparent 18%);
+    radial-gradient(circle at var(--burst-x) var(--burst-y), rgba(var(--burst-rgb), 0.18), transparent 38%);
 }
 
 #corner-effect.is-active::before {
-  animation: corner-ring 1.35s cubic-bezier(0.1, 0.9, 0.2, 1) both;
-}
-
-#corner-effect.is-active::after {
-  animation: corner-ring 1.55s 0.1s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+  animation: corner-ring 1.05s cubic-bezier(0.16, 0.84, 0.24, 1) both;
 }
 
 @keyframes corner-wash {
   0% {
-    opacity: 0.95;
+    opacity: 0.9;
   }
 
   100% {
@@ -94,12 +115,12 @@ h1 {
 
 @keyframes corner-ring {
   0% {
-    opacity: 0.95;
+    opacity: 0.75;
     transform: translate(-50%, -50%) scale(0.2);
   }
 
   100% {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(150);
+    transform: translate(-50%, -50%) scale(90);
   }
 }
