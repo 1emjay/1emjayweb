@@ -1,6 +1,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 
 const canvas = document.querySelector('#stage');
+const cornerEffectElement = document.querySelector('#corner-effect');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020203);
@@ -55,35 +56,63 @@ scene.add(rimLight);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const velocity = new THREE.Vector2(1, 0.72).normalize();
 const bounds = new THREE.Box3();
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
+const cornerRun = {
+  active: false,
+  source: 'auto',
+  startTime: 0,
+  duration: 0.8,
+  corner: { x: 1, y: 1 },
+  start: new THREE.Vector3(),
+  target: new THREE.Vector3(),
+  rotation: new THREE.Euler(),
+};
 let currentSpeed = 150;
 let lastAccentSwap = 0;
+let nextNaturalCornerAt = Infinity;
 
 resize();
 window.addEventListener('resize', resize, { passive: true });
 window.visualViewport?.addEventListener('resize', resize, { passive: true });
+canvas.addEventListener('pointerdown', handlePointerDown);
+canvas.addEventListener('pointermove', handlePointerMove);
+canvas.addEventListener('pointerleave', () => {
+  canvas.style.cursor = 'default';
+});
+scheduleNaturalCorner(clock.elapsedTime, true);
 renderer.setAnimationLoop(render);
 
 function render() {
   const elapsed = clock.elapsedTime;
   const delta = Math.min(clock.getDelta(), 0.04);
-  const motionScale = reducedMotion ? 0.35 : 1;
+  const motionScale = getMotionScale();
 
-  construction.group.position.x += velocity.x * currentSpeed * delta * motionScale;
-  construction.group.position.y += velocity.y * currentSpeed * delta * motionScale;
-
-  construction.group.rotation.x = Math.sin(elapsed * 0.7) * 0.18;
-  construction.group.rotation.y = 0.26 + Math.sin(elapsed * 0.82) * 0.36;
-  construction.group.rotation.z = Math.sin(elapsed * 0.52) * 0.08;
+  if (!cornerRun.active) {
+    construction.group.rotation.x = Math.sin(elapsed * 0.7) * 0.18;
+    construction.group.rotation.y = 0.26 + Math.sin(elapsed * 0.82) * 0.36;
+    construction.group.rotation.z = Math.sin(elapsed * 0.52) * 0.08;
+  }
 
   construction.equalizerBars.forEach((bar, index) => {
     const wave = Math.sin(elapsed * 4.8 + index * 0.85) * 0.5 + 0.5;
     bar.scale.y = 0.36 + wave * 0.94;
   });
 
-  rimLight.color.set(palette[accentIndex]);
-  clampToViewport(elapsed);
+  if (!cornerRun.active && elapsed >= nextNaturalCornerAt) {
+    startCornerRun('auto', elapsed);
+  }
 
+  if (cornerRun.active) {
+    updateCornerRun(elapsed);
+  } else {
+    construction.group.position.x += velocity.x * currentSpeed * delta * motionScale;
+    construction.group.position.y += velocity.y * currentSpeed * delta * motionScale;
+    clampToViewport(elapsed);
+  }
+
+  rimLight.color.set(palette[accentIndex]);
   renderer.render(scene, camera);
 }
 
@@ -114,8 +143,123 @@ function resize() {
   const maximumScale = Math.min(width / 610, height / 330, 0.86);
   construction.group.scale.setScalar(Math.max(0.18, Math.min(preferredScale, maximumScale)));
 
+  if (cornerRun.active) {
+    cornerRun.target.copy(getCornerTarget(cornerRun.corner));
+  }
+
   currentSpeed = THREE.MathUtils.clamp(Math.min(width, height) * 0.34, 104, 190);
   clampToViewport(clock.elapsedTime, true);
+}
+
+function handlePointerDown(event) {
+  if (!isPointerOnSign(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  startCornerRun('click', clock.elapsedTime);
+}
+
+function handlePointerMove(event) {
+  canvas.style.cursor = isPointerOnSign(event) ? 'pointer' : 'default';
+}
+
+function isPointerOnSign(event) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+  raycaster.setFromCamera(pointer, camera);
+
+  return raycaster.intersectObject(construction.group, true).length > 0;
+}
+
+function startCornerRun(source, elapsed) {
+  if (cornerRun.active) {
+    return;
+  }
+
+  const corner = currentDirectionCorner();
+  cornerRun.active = true;
+  cornerRun.source = source;
+  cornerRun.startTime = elapsed;
+  cornerRun.corner = corner;
+  cornerRun.start.copy(construction.group.position);
+  cornerRun.rotation.copy(construction.group.rotation);
+  cornerRun.target.copy(getCornerTarget(corner));
+
+  const distance = cornerRun.start.distanceTo(cornerRun.target);
+  if (source === 'click') {
+    cornerRun.duration = THREE.MathUtils.clamp(distance / 1400, 0.28, 0.68);
+  } else {
+    cornerRun.duration = Math.max(distance / (currentSpeed * getMotionScale()), 0.28);
+  }
+}
+
+function updateCornerRun(elapsed) {
+  const progress = THREE.MathUtils.clamp((elapsed - cornerRun.startTime) / cornerRun.duration, 0, 1);
+  const travelProgress = cornerRun.source === 'click' ? easeInOutCubic(progress) : progress;
+
+  construction.group.rotation.copy(cornerRun.rotation);
+  construction.group.position.lerpVectors(cornerRun.start, cornerRun.target, travelProgress);
+
+  if (progress >= 1) {
+    finishCornerRun(elapsed);
+  }
+}
+
+function finishCornerRun(elapsed) {
+  snapToCorner(cornerRun.corner);
+  velocity.set(-cornerRun.corner.x, -cornerRun.corner.y).normalize();
+  cornerRun.active = false;
+  lastAccentSwap = elapsed;
+  setAccent((accentIndex + 1) % palette.length);
+  playCornerEffect(cornerRun.corner, elapsed);
+  scheduleNaturalCorner(elapsed);
+}
+
+function currentDirectionCorner() {
+  return {
+    x: velocity.x >= 0 ? 1 : -1,
+    y: velocity.y >= 0 ? 1 : -1,
+  };
+}
+
+function getCornerTarget(corner) {
+  construction.group.updateMatrixWorld(true);
+  bounds.setFromObject(construction.group);
+
+  const leftOffset = bounds.min.x - construction.group.position.x;
+  const rightOffset = bounds.max.x - construction.group.position.x;
+  const bottomOffset = bounds.min.y - construction.group.position.y;
+  const topOffset = bounds.max.y - construction.group.position.y;
+
+  return new THREE.Vector3(
+    corner.x > 0 ? viewport.right - rightOffset : viewport.left - leftOffset,
+    corner.y > 0 ? viewport.top - topOffset : viewport.bottom - bottomOffset,
+    construction.group.position.z,
+  );
+}
+
+function snapToCorner(corner) {
+  construction.group.position.copy(getCornerTarget(corner));
+  construction.group.updateMatrixWorld(true);
+}
+
+function scheduleNaturalCorner(elapsed, first = false) {
+  const minDelay = first ? 5.5 : 10;
+  const maxDelay = first ? 8.5 : 17;
+  const motionScale = reducedMotion ? 1.7 : 1;
+  nextNaturalCornerAt = elapsed + (minDelay + Math.random() * (maxDelay - minDelay)) * motionScale;
+}
+
+function getMotionScale() {
+  return reducedMotion ? 0.35 : 1;
+}
+
+function easeInOutCubic(value) {
+  return value < 0.5
+    ? 4 * value * value * value
+    : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
 function clampToViewport(elapsed, force = false) {
@@ -164,6 +308,30 @@ function setAccent(nextIndex) {
       material.emissive.set(palette[accentIndex]);
     }
   });
+}
+
+function playCornerEffect(corner) {
+  if (!cornerEffectElement) {
+    return;
+  }
+
+  const rgb = hexToRgb(palette[accentIndex]);
+  cornerEffectElement.style.setProperty('--burst-x', corner.x > 0 ? '100%' : '0%');
+  cornerEffectElement.style.setProperty('--burst-y', corner.y > 0 ? '0%' : '100%');
+  cornerEffectElement.style.setProperty('--burst-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+  cornerEffectElement.classList.remove('is-active');
+  void cornerEffectElement.offsetWidth;
+  cornerEffectElement.classList.add('is-active');
+}
+
+function hexToRgb(hex) {
+  const value = Number.parseInt(hex.slice(1), 16);
+
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
 }
 
 function createConstructionObject() {

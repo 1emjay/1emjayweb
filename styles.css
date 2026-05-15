@@ -39,3 +39,67 @@ h1 {
     radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.035), transparent 34rem),
     #020203;
 }
+
+#corner-effect {
+  --burst-x: 100%;
+  --burst-y: 0%;
+  --burst-rgb: 255, 122, 26;
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+
+#corner-effect::before,
+#corner-effect::after {
+  content: "";
+  position: absolute;
+  left: var(--burst-x);
+  top: var(--burst-y);
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 0.12rem solid rgb(var(--burst-rgb));
+  border-radius: 999rem;
+  box-shadow: 0 0 1.6rem rgba(var(--burst-rgb), 0.8);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.2);
+}
+
+#corner-effect.is-active {
+  animation: corner-wash 1.55s ease-out both;
+  background:
+    radial-gradient(circle at var(--burst-x) var(--burst-y), rgba(var(--burst-rgb), 0.42), transparent 42%),
+    radial-gradient(circle at var(--burst-x) var(--burst-y), rgba(255, 255, 255, 0.2), transparent 18%);
+}
+
+#corner-effect.is-active::before {
+  animation: corner-ring 1.35s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+
+#corner-effect.is-active::after {
+  animation: corner-ring 1.55s 0.1s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+
+@keyframes corner-wash {
+  0% {
+    opacity: 0.95;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes corner-ring {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(150);
+  }
+}
