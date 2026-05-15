@@ -68,6 +68,33 @@ let speedBoost = 1;
 let lastAccentSwap = 0;
 let nextNaturalCornerAt = Infinity;
 
+const TRAIL_MAX = 48;
+const TRAIL_LIFETIME = 0.42;
+const TRAIL_BASE_SIZE = 110;
+const TRAIL_SPAWN_DISTANCE_BASE = 58;
+const TRAIL_TRIGGER_BOOST = 1.35;
+const trail = [];
+const trailColor = new THREE.Color();
+const lastTrailPosition = new THREE.Vector2();
+let trailWriteIndex = 0;
+
+const trailTexture = createTrailDotTexture();
+const trailGeometry = new THREE.PlaneGeometry(1, 1);
+for (let i = 0; i < TRAIL_MAX; i += 1) {
+  const material = new THREE.MeshBasicMaterial({
+    map: trailTexture,
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(trailGeometry, material);
+  mesh.visible = false;
+  mesh.renderOrder = -1;
+  scene.add(mesh);
+  trail.push({ mesh, material, born: -1 });
+}
+
 await waitForFonts();
 mark.repaint();
 
@@ -105,6 +132,8 @@ function render() {
     mark.group.position.y += velocity.y * effectiveSpeed * delta * motionScale;
     clampToViewport(elapsed);
   }
+
+  updateTrail(elapsed);
 
   renderer.render(scene, camera);
 }
@@ -151,7 +180,43 @@ function handlePointerDown(event) {
   }
 
   event.preventDefault();
+
+  if (cornerRun.active) {
+    cancelCornerRun(clock.elapsedTime);
+  }
+
   speedBoost = clickBoostMax;
+  setAccent((accentIndex + 1) % accentPalette.length);
+  lastAccentSwap = clock.elapsedTime;
+  lastTrailPosition.set(mark.group.position.x, mark.group.position.y);
+  spawnTrailDot(clock.elapsedTime);
+  playClickEffect();
+}
+
+function cancelCornerRun(elapsed) {
+  if (!cornerRun.active) {
+    return;
+  }
+
+  const progress = THREE.MathUtils.clamp(
+    (elapsed - cornerRun.startTime) / cornerRun.duration,
+    0,
+    1,
+  );
+  const u = 1 - progress;
+  const tangentX =
+    2 * u * (cornerRun.control.x - cornerRun.start.x) +
+    2 * progress * (cornerRun.target.x - cornerRun.control.x);
+  const tangentY =
+    2 * u * (cornerRun.control.y - cornerRun.start.y) +
+    2 * progress * (cornerRun.target.y - cornerRun.control.y);
+  const len = Math.hypot(tangentX, tangentY);
+  if (len > 0.0001) {
+    velocity.set(tangentX / len, tangentY / len);
+  }
+
+  cornerRun.active = false;
+  scheduleNaturalCorner(elapsed);
 }
 
 function handlePointerMove(event) {
@@ -331,17 +396,95 @@ function setAccent(nextIndex) {
 }
 
 function playCornerEffect(corner) {
+  playBurstEffect(corner.x > 0 ? 100 : 0, corner.y > 0 ? 0 : 100);
+}
+
+function playClickEffect() {
+  if (viewport.width <= 0 || viewport.height <= 0) {
+    return;
+  }
+  const xPercent = ((mark.group.position.x - viewport.left) / viewport.width) * 100;
+  const yPercent = ((viewport.top - mark.group.position.y) / viewport.height) * 100;
+  playBurstEffect(xPercent, yPercent);
+}
+
+function playBurstEffect(xPercent, yPercent) {
   if (!cornerEffectElement) {
     return;
   }
 
   const rgb = hexToRgb(accentPalette[accentIndex]);
-  cornerEffectElement.style.setProperty('--burst-x', corner.x > 0 ? '100%' : '0%');
-  cornerEffectElement.style.setProperty('--burst-y', corner.y > 0 ? '0%' : '100%');
+  cornerEffectElement.style.setProperty('--burst-x', `${xPercent}%`);
+  cornerEffectElement.style.setProperty('--burst-y', `${yPercent}%`);
   cornerEffectElement.style.setProperty('--burst-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
   cornerEffectElement.classList.remove('is-active');
   void cornerEffectElement.offsetWidth;
   cornerEffectElement.classList.add('is-active');
+}
+
+function spawnTrailDot(elapsed) {
+  const slot = trail[trailWriteIndex];
+  slot.mesh.position.set(mark.group.position.x, mark.group.position.y, -1);
+  slot.born = elapsed;
+  trailColor.set(accentPalette[accentIndex]);
+  slot.material.color.copy(trailColor);
+  slot.material.opacity = 0;
+  slot.mesh.visible = true;
+  trailWriteIndex = (trailWriteIndex + 1) % TRAIL_MAX;
+  lastTrailPosition.set(mark.group.position.x, mark.group.position.y);
+}
+
+function updateTrail(elapsed) {
+  const markScale = mark.group.scale.x;
+
+  if (!cornerRun.active && speedBoost > TRAIL_TRIGGER_BOOST) {
+    const spawnDist = TRAIL_SPAWN_DISTANCE_BASE * markScale;
+    const dx = mark.group.position.x - lastTrailPosition.x;
+    const dy = mark.group.position.y - lastTrailPosition.y;
+    if (dx * dx + dy * dy >= spawnDist * spawnDist) {
+      spawnTrailDot(elapsed);
+    }
+  }
+
+  const baseSize = TRAIL_BASE_SIZE * markScale;
+  for (let i = 0; i < TRAIL_MAX; i += 1) {
+    const slot = trail[i];
+    if (slot.born < 0) continue;
+    const age = elapsed - slot.born;
+    if (age >= TRAIL_LIFETIME || age < 0) {
+      slot.mesh.visible = false;
+      slot.material.opacity = 0;
+      slot.born = -1;
+      continue;
+    }
+    const t = age / TRAIL_LIFETIME;
+    slot.material.opacity = 0.45 * (1 - t);
+    slot.mesh.scale.setScalar(baseSize * (1 - t * 0.55));
+  }
+}
+
+function createTrailDotTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    0,
+    size / 2,
+    size / 2,
+    size / 2,
+  );
+  grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.35)');
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 function hexToRgb(hex) {
@@ -438,11 +581,11 @@ function createMark() {
     ctx.fillText(WORDMARK, textureWidth / 2, textureHeight / 2 + 32);
 
     ctx.fillStyle = inkMutedColor;
-    ctx.font = "400 32px 'Space Grotesk', system-ui, sans-serif";
+    ctx.font = "400 46px 'Space Grotesk', system-ui, sans-serif";
     if ('letterSpacing' in ctx) {
-      ctx.letterSpacing = '8px';
+      ctx.letterSpacing = '10px';
     }
-    ctx.fillText(CAPTION.toUpperCase(), textureWidth / 2, textureHeight / 2 + 100);
+    ctx.fillText(CAPTION.toUpperCase(), textureWidth / 2, textureHeight / 2 + 114);
     if ('letterSpacing' in ctx) {
       ctx.letterSpacing = '0px';
     }
