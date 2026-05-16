@@ -106,7 +106,6 @@ canvas.addEventListener('pointermove', handlePointerMove);
 canvas.addEventListener('pointerleave', () => {
   canvas.style.cursor = 'default';
 });
-scheduleNaturalCorner(clock.elapsedTime, true);
 renderer.setAnimationLoop(render);
 
 function render() {
@@ -184,6 +183,12 @@ function handlePointerDown(event) {
   if (cornerRun.active) {
     cancelCornerRun(clock.elapsedTime);
   }
+
+  const currentAngle = Math.atan2(velocity.y, velocity.x);
+  const minTurn = Math.PI / 4;
+  const offset = minTurn + Math.random() * (Math.PI * 2 - 2 * minTurn);
+  const nextAngle = currentAngle + offset;
+  velocity.set(Math.cos(nextAngle), Math.sin(nextAngle));
 
   speedBoost = clickBoostMax;
   setAccent((accentIndex + 1) % accentPalette.length);
